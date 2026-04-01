@@ -1,0 +1,1452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FlowMail v4 — Outlook Kanban</title>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.1/lib/msal-browser.min.js" crossorigin="anonymous"></script>
+<script>
+// Fallback CDN if jsdelivr fails
+window.addEventListener('error', function(e) {
+  if (e.target && e.target.src && e.target.src.includes('msal-browser')) {
+    var s = document.createElement('script');
+    s.src = 'https://unpkg.com/@azure/msal-browser@3.28.1/lib/msal-browser.min.js';
+    document.head.appendChild(s);
+  }
+}, true);
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f5f5f5;
+    --surface: #ffffff;
+    --surface2: #f0f2f5;
+    --border: #e1e4e8;
+    --accent: #0078d4;
+    --accent2: #d13438;
+    --accent3: #107c10;
+    --text: #1b1b1b;
+    --muted: #616161;
+    --col-inbox: #0078d4;
+    --col-todo: #ca5010;
+    --col-waiting: #038387;
+    --col-done: #107c10;
+    --col-archive: #8a8886;
+    --shadow: 0 1px 4px rgba(0,0,0,.1);
+    --shadow-lg: 0 4px 16px rgba(0,0,0,.12);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* HEADER */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+    z-index: 100;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+  }
+
+  .logo {
+    font-family: 'Segoe UI Semibold', 'Segoe UI', sans-serif;
+    font-weight: 800;
+    font-size: 1.3rem;
+    letter-spacing: -0.03em;
+    color: var(--accent);
+    -webkit-text-fill-color: var(--accent);
+  }
+
+  .logo span { color: var(--muted); -webkit-text-fill-color: var(--muted); font-weight: 400; font-size: 0.85rem; margin-left: 8px; }
+
+  .header-right { display: flex; align-items: center; gap: 12px; }
+
+  .user-pill {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 999px; padding: 6px 14px 6px 8px;
+    font-size: 0.78rem; color: var(--muted);
+  }
+
+  .avatar {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.7rem; font-weight: 700; color: white;
+    font-family: 'Segoe UI Semibold', 'Segoe UI', sans-serif;
+  }
+
+  .btn {
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 0.78rem; padding: 8px 18px;
+    border-radius: 8px; border: none; cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-primary {
+    background: var(--accent); color: white;
+  }
+  .btn-primary:hover { background: #6b58f0; transform: translateY(-1px); }
+
+  .btn-ghost {
+    background: transparent; color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--text); }
+
+  .sync-btn {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--muted); padding: 7px 14px; border-radius: 8px;
+    font-size: 0.75rem; cursor: pointer; transition: all 0.2s;
+    font-family: 'Segoe UI', sans-serif;
+  }
+  .sync-btn:hover { border-color: var(--accent3); color: var(--accent3); }
+  .sync-btn.spinning svg { animation: spin 1s linear infinite; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* BOARD */
+  .board-wrap {
+    flex: 1; overflow-x: auto; overflow-y: hidden;
+    padding: 24px 20px;
+    display: flex; gap: 14px;
+  }
+
+  .column {
+    flex-shrink: 0; width: 200px;
+    display: flex; flex-direction: column;
+    gap: 0;
+  }
+
+  .column.col-inbox {
+    width: 360px;
+  }
+
+  .card-subject {
+    font-family: 'Segoe UI Semibold', 'Segoe UI', sans-serif;
+    font-weight: 700; font-size: 0.82rem;
+    color: var(--text);
+    margin-bottom: 6px; margin-top: 4px;
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .card-preview {
+    font-size: 0.75rem; color: var(--muted);
+    line-height: 1.6;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin-bottom: 4px;
+  }
+
+  .col-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-radius: 10px 10px 0 0;
+    border: 1px solid var(--border); border-bottom: none;
+    background: var(--surface);
+  }
+
+  .col-title {
+    display: flex; align-items: center; gap: 8px;
+    font-family: 'Segoe UI Semibold', 'Segoe UI', sans-serif; font-weight: 700;
+    font-size: 0.82rem; letter-spacing: 0.05em; text-transform: uppercase;
+  }
+
+  .col-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+  }
+
+  .col-count {
+    font-size: 0.72rem; color: var(--muted);
+    background: var(--surface2); border: 1px solid var(--border);
+    padding: 2px 8px; border-radius: 999px;
+  }
+
+  .col-body {
+    flex: 1; overflow-y: auto;
+    border: 1px solid var(--border); border-top: none;
+    border-radius: 0 0 10px 10px;
+    background: var(--surface);
+    padding: 8px;
+    display: flex; flex-direction: column; gap: 8px;
+    min-height: 200px;
+    max-height: calc(100vh - 160px);
+  }
+
+  .col-body::-webkit-scrollbar { width: 4px; }
+  .col-body::-webkit-scrollbar-track { background: transparent; }
+  .col-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  .col-body.drag-over {
+    background: var(--surface2);
+    border-color: var(--accent);
+  }
+
+  /* CARDS */
+  .card {
+    background: var(--surface);
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    cursor: grab;
+    transition: all 0.18s;
+    position: relative;
+    animation: cardIn 0.25s ease forwards;
+  }
+
+  @keyframes cardIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .card::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    border-radius: 3px 0 0 3px;
+    background: var(--card-col-color, var(--accent));
+    pointer-events: none;
+  }
+
+  .card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(124,106,255,0.15);
+  }
+
+  .card.dragging {
+    opacity: 0.4; cursor: grabbing;
+  }
+
+  .card-from {
+    font-size: 0.73rem; color: var(--text);
+    font-weight: 600;
+    margin-bottom: 2px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 6px;
+  }
+
+  .card-from-name {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    flex: 1;
+  }
+
+  .card-date {
+    font-size: 0.68rem; color: var(--muted);
+    flex-shrink: 0; font-weight: 400;
+  }
+
+  .card-unread { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-left: 4px; }
+
+  .card-subject {
+    font-family: 'Segoe UI Semibold', 'Segoe UI', sans-serif;
+    font-weight: 700; font-size: 0.82rem;
+    color: var(--text);
+    margin-bottom: 6px; margin-top: 4px;
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .card-preview {
+    font-size: 0.75rem; color: var(--muted);
+    line-height: 1.6;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin-bottom: 4px;
+  }
+
+  .card-folder-row {
+    margin-top: 8px;
+  }
+
+  .card-meta {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 10px; padding-top: 8px;
+    border-top: 1px solid var(--border);
+    font-size: 0.68rem; color: var(--muted);
+  }
+
+  .card-actions {
+    display: flex; gap: 6px; opacity: 0; transition: opacity 0.2s;
+  }
+  .card:hover .card-actions { opacity: 1; }
+
+  .card-action-btn {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 4px; padding: 3px 8px;
+    font-size: 0.65rem; color: var(--muted);
+    cursor: pointer; transition: all 0.15s;
+    font-family: 'Segoe UI', sans-serif;
+  }
+  .card-action-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Column accent colors */
+  [data-col="inbox"] .card::before { background: var(--col-inbox); }
+  [data-col="todo"] .card::before { background: var(--col-todo); }
+  [data-col="waiting"] .card::before { background: var(--col-waiting); }
+  [data-col="done"] .card::before { background: var(--col-done); }
+  [data-col="archive"] .card::before { background: var(--col-archive); }
+
+  [data-col="inbox"] .col-dot { background: var(--col-inbox); }
+  [data-col="todo"] .col-dot { background: var(--col-todo); }
+  [data-col="waiting"] .col-dot { background: var(--col-waiting); }
+  [data-col="done"] .col-dot { background: var(--col-done); }
+  [data-col="archive"] .col-dot { background: var(--col-archive); }
+
+  /* LOGIN SCREEN */
+  #login-screen {
+    position: fixed; inset: 0;
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+    flex-direction: column; gap: 0;
+  }
+
+  .login-card {
+    background: var(--surface);
+    box-shadow: 0 4px 24px rgba(0,0,0,.1);
+    border: 1px solid var(--border);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 48px 52px;
+    max-width: 420px; width: 100%;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .login-card::before {
+    content: '';
+    position: absolute;
+    top: -60px; left: 50%; transform: translateX(-50%);
+    width: 200px; height: 200px;
+    background: radial-gradient(circle, rgba(124,106,255,0.2) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .login-logo {
+    font-family: 'Segoe UI Semibold', 'Segoe UI', sans-serif;
+    font-weight: 800; font-size: 2.2rem;
+    letter-spacing: -0.04em;
+    color: var(--accent);
+    -webkit-text-fill-color: var(--accent);
+    margin-bottom: 8px;
+  }
+
+  .login-tagline {
+    color: var(--muted); font-size: 0.82rem;
+    margin-bottom: 36px; line-height: 1.6;
+  }
+
+  .ms-btn {
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+    width: 100%; padding: 14px 24px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 10px; cursor: pointer;
+    font-family: 'Segoe UI Semibold', 'Segoe UI', sans-serif; font-weight: 600; font-size: 0.9rem;
+    color: var(--text); transition: all 0.2s;
+  }
+  .ms-btn:hover { border-color: var(--accent); background: rgba(124,106,255,0.08); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(124,106,255,0.15); }
+
+  .ms-logo { width: 20px; height: 20px; flex-shrink: 0; }
+
+  .login-note { margin-top: 20px; font-size: 0.72rem; color: var(--muted); line-height: 1.6; }
+
+  /* EMPTY STATE */
+  .empty-col {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 8px; color: var(--muted); font-size: 0.75rem;
+    padding: 24px; text-align: center;
+  }
+
+  .empty-icon { font-size: 1.5rem; opacity: 0.4; }
+
+  /* TOAST */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 18px;
+    font-size: 0.78rem; color: var(--text);
+    transform: translateY(80px); opacity: 0;
+    transition: all 0.3s; z-index: 9999;
+    max-width: 300px;
+  }
+  #toast.show { transform: translateY(0); opacity: 1; }
+  #toast.success { border-color: var(--accent3); }
+  #toast.error { border-color: var(--accent2); }
+
+  /* MODAL */
+  #modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 500; display: none;
+    align-items: center; justify-content: center;
+    backdrop-filter: blur(4px);
+  }
+  #modal-overlay.open { display: flex; }
+
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px; padding: 32px;
+    max-width: 560px; width: 90%;
+    max-height: 80vh; overflow-y: auto;
+  }
+
+  .modal h2 {
+    font-family: 'Segoe UI Semibold', 'Segoe UI', sans-serif; font-weight: 700;
+    font-size: 1.1rem; margin-bottom: 6px;
+  }
+
+  .modal-from { color: var(--muted); font-size: 0.78rem; margin-bottom: 16px; }
+  .modal-body { font-size: 0.82rem; line-height: 1.8; color: var(--text); white-space: pre-wrap; }
+
+  .modal-footer {
+    display: flex; gap: 10px; margin-top: 24px;
+    flex-wrap: wrap;
+  }
+
+  .loading-dots::after {
+    content: '';
+    animation: dots 1.2s steps(3, end) infinite;
+  }
+  @keyframes dots {
+    0%   { content: ''; }
+    33%  { content: '.'; }
+    66%  { content: '..'; }
+    100% { content: '...'; }
+  }
+
+  /* TRASH ZONE */
+  #trash-zone {
+    position: fixed;
+    bottom: 32px; left: 50%; transform: translateX(-50%) translateY(120px);
+    background: var(--surface);
+    border: 2px dashed var(--border);
+    border-radius: 16px;
+    padding: 16px 40px;
+    display: flex; align-items: center; gap: 12px;
+    font-family: 'Segoe UI Semibold', 'Segoe UI', sans-serif; font-weight: 700;
+    font-size: 0.85rem; color: var(--muted);
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    z-index: 200; pointer-events: none;
+    white-space: nowrap;
+  }
+  #trash-zone.visible {
+    transform: translateX(-50%) translateY(0);
+    pointer-events: all;
+  }
+  #trash-zone.hot {
+    background: rgba(255,106,142,0.12);
+    border-color: var(--accent2);
+    color: var(--accent2);
+    transform: translateX(-50%) translateY(0) scale(1.05);
+  }
+
+  /* Scrollbar for board */
+  .board-wrap::-webkit-scrollbar { height: 6px; }
+  .board-wrap::-webkit-scrollbar-track { background: transparent; }
+  .board-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">FlowMail</div>
+    <p class="login-tagline">Your Outlook inbox as a kanban board.<br><span style="font-size:0.75rem;opacity:.7">Works from any browser, anywhere.</span></p>
+    <div id="auth-error-banner" style="display:none;background:#fde7e9;border:1px solid #d13438;border-radius:8px;padding:10px 14px;font-size:0.76rem;color:#d13438;margin-bottom:12px;max-width:340px;text-align:left;line-height:1.5"></div>
+    <button class="ms-btn" onclick="typeof signIn==='function'?signIn():alert('Page still loading, please wait a moment and try again.')">
+      <svg class="ms-logo" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
+        <rect x="1" y="1" width="9" height="9" fill="#f25022"/>
+        <rect x="11" y="1" width="9" height="9" fill="#7fba00"/>
+        <rect x="1" y="11" width="9" height="9" fill="#00a4ef"/>
+        <rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
+      </svg>
+      Sign in with Microsoft
+    </button>
+    <p class="login-note">Reads your Outlook inbox via Microsoft Graph API.<br>Nothing is stored — all data stays in your browser.</p>
+  </div>
+</div>
+
+<!-- APP -->
+<header id="app-header" style="display:none">
+  <div style="display:flex;align-items:center;gap:16px">
+    <div class="logo">FlowMail <span>// v4</span></div>
+  </div>
+  <div class="header-right">
+    <button class="sync-btn" onclick="openColEditor()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      Edit columns
+    </button>
+    <button class="sync-btn" id="sync-btn" onclick="loadEmails()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <polyline points="23 4 23 10 17 10"></polyline>
+        <polyline points="1 20 1 14 7 14"></polyline>
+        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+      </svg>
+      Sync inbox
+    </button>
+    <div class="user-pill">
+      <div class="avatar" id="user-avatar">?</div>
+      <span id="user-name">Loading...</span>
+    </div>
+    <button class="btn btn-ghost" onclick="signOut()">Sign out</button>
+  </div>
+</header>
+
+<div class="board-wrap" id="board" style="display:none" ondragover="startDragScroll(event)">
+  <!-- Columns injected by JS -->
+</div>
+
+<!-- Column Editor Modal -->
+<div id="col-editor-overlay" onclick="closeColEditor(event)" style="position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:600;display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px)">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:32px;max-width:480px;width:90%;max-height:80vh;overflow-y:auto" onclick="event.stopPropagation()">
+    <h2 style="font-family:Segoe UI,sans-serif;font-weight:700;font-size:1.1rem;margin-bottom:6px">Edit Columns</h2>
+    <p style="color:var(--muted);font-size:0.78rem;margin-bottom:20px">Rename, reorder, add or remove columns. The first column always receives new emails.</p>
+    <div id="col-editor-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px"></div>
+    <button class="btn btn-ghost" onclick="addColumn()" style="width:100%;margin-bottom:16px;border-style:dashed">+ Add column</button>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeColEditor()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveColumns()">Save columns</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete Confirm Modal -->
+<div id="delete-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:700;display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px)">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:32px;max-width:380px;width:90%;text-align:center">
+    <div style="font-size:2rem;margin-bottom:12px">🗑️</div>
+    <h2 style="font-family:Segoe UI,sans-serif;font-weight:700;font-size:1rem;margin-bottom:8px">Delete this email?</h2>
+    <p style="color:var(--muted);font-size:0.78rem;margin-bottom:24px">This will move it to your Deleted Items folder in Outlook.</p>
+    <div style="display:flex;gap:10px;justify-content:center">
+      <button class="btn btn-ghost" onclick="closeDeleteConfirm()">Cancel</button>
+      <button class="btn" id="confirm-delete-btn" style="background:var(--accent2);color:white" onclick="confirmDelete()">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div id="modal-overlay" onclick="closeModal(event)">
+  <div class="modal" id="modal-content">
+    <h2 id="modal-subject"></h2>
+    <div class="modal-from" id="modal-from"></div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<!-- Trash Drop Zone -->
+<div id="trash-zone"
+  ondragover="onTrashDragOver(event)"
+  ondragleave="onTrashDragLeave(event)"
+  ondrop="onTrashDrop(event)">
+  <span style="font-size:1.3rem">🗑️</span>
+  Drop here to delete
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// ─── CONFIG ───────────────────────────────────────────────
+const MSAL_CONFIG = {
+  auth: {
+    clientId: "6f89cfa0-cf53-40de-81b1-cb1b4e33ede6",
+    authority: "https://login.microsoftonline.com/f48e45ec-eac8-4add-bbda-97ff0de288a5",
+    redirectUri: window.location.href.split("?")[0].split("#")[0],
+  },
+  cache: { cacheLocation: "sessionStorage" }
+};
+
+const SCOPES = ["Mail.Read", "Mail.ReadWrite", "User.Read"];
+
+const COLUMNS = [
+  { id: "inbox",    label: "Inbox",             icon: "📥", outlookFolder: null },
+  { id: "todo",     label: "To Do",             icon: "⚡", outlookFolder: "To Do" },
+  { id: "review",   label: "Review Details",    icon: "🔍", outlookFolder: "Review Details" },
+  { id: "super",    label: "Supervising",        icon: "👁", outlookFolder: "Supervising" },
+  { id: "archive",  label: "Archive (done)",     icon: "✅", outlookFolder: "To Archive" },
+  { id: "ref",      label: "For Reference",      icon: "📌", outlookFolder: "For reference" },
+  { id: "followup", label: "Need to Follow up",  icon: "🔔", outlookFolder: "Need to Follow up" },
+];
+
+// ─── STATE ────────────────────────────────────────────────
+let msalInstance, account, accessToken;
+let cards = {}; // { cardId: { email, col } }
+let colAssignments = {}; // { emailId: colId } — persisted in sessionStorage
+let openEmailData = null;
+
+// ─── INIT ─────────────────────────────────────────────────
+let msalReady = false;
+
+window.onload = async () => {
+  try {
+    msalInstance = new msal.PublicClientApplication(MSAL_CONFIG);
+    await msalInstance.initialize();
+    msalReady = true;
+
+    const saved = sessionStorage.getItem('flowmail_cols');
+    if (saved) colAssignments = JSON.parse(saved);
+
+    // Restore custom columns if saved
+    const savedCols = sessionStorage.getItem('flowmail_columns');
+    if (savedCols) {
+      const parsed = JSON.parse(savedCols);
+      COLUMNS.length = 0;
+      parsed.forEach(c => COLUMNS.push(c));
+    }
+
+    const accounts = msalInstance.getAllAccounts();
+    if (accounts.length > 0) {
+      account = accounts[0];
+      await initApp();
+    }
+  } catch(e) {
+    console.error('MSAL init error:', e);
+    showToast('Auth init failed: ' + e.message, 'error');
+    const banner = document.getElementById('auth-error-banner');
+    if (banner) {
+      banner.style.display = 'block';
+      if (e.message && e.message.includes('redirect')) {
+        banner.innerHTML = '⚠️ Redirect URI mismatch. Please add <strong>' + window.location.href.split('?')[0].split('#')[0] + '</strong> as a redirect URI in your Azure app registration (as a Single-page application).';
+      } else {
+        banner.textContent = '⚠️ ' + e.message;
+      }
+    }
+  }
+};
+
+async function getToken() {
+  try {
+    const res = await msalInstance.acquireTokenSilent({ scopes: SCOPES, account });
+    return res.accessToken;
+  } catch(e) {
+    const res = await msalInstance.acquireTokenPopup({ scopes: SCOPES });
+    return res.accessToken;
+  }
+}
+
+// ─── AUTH ─────────────────────────────────────────────────
+async function signIn() {
+  if (!msalReady) {
+    showToast('Auth still loading, please wait a moment...', 'error');
+    return;
+  }
+  try {
+    const resp = await msalInstance.loginPopup({ scopes: SCOPES, prompt: 'select_account' });
+    if (resp && resp.account) {
+      account = resp.account;
+      await initApp();
+    }
+  } catch(e) {
+    console.error('Login error:', e);
+    const msg = e.message || String(e);
+    showToast('Sign-in failed: ' + msg, 'error');
+    const banner = document.getElementById('auth-error-banner');
+    if (banner) {
+      banner.style.display = 'block';
+      if (msg.includes('popup') || msg.includes('blocked')) {
+        banner.innerHTML = '<strong>Popup blocked.</strong> Please allow popups for this page in your browser address bar, then try again.';
+      } else {
+        banner.innerHTML = '<strong>Sign-in error:</strong> ' + msg;
+      }
+    }
+  }
+}
+
+function signOut() {
+  msalInstance.logoutPopup({ account });
+  location.reload();
+}
+
+async function initApp() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-header').style.display = 'flex';
+  document.getElementById('board').style.display = 'flex';
+
+  accessToken = await getToken();
+
+  // Get user info
+  try {
+    const me = await graphGet('/me?$select=displayName,mail,userPrincipalName');
+    const initials = me.displayName.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
+    document.getElementById('user-avatar').textContent = initials;
+    document.getElementById('user-name').textContent = me.displayName;
+  } catch(e) {}
+
+  renderBoard();
+  await loadEmails();
+}
+
+// ─── GRAPH API ────────────────────────────────────────────
+async function graphGet(path) {
+  const token = await getToken();
+  const res = await fetch('https://graph.microsoft.com/v1.0' + path, {
+    headers: { Authorization: 'Bearer ' + token }
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function graphPatch(path, body) {
+  const token = await getToken();
+  const res = await fetch('https://graph.microsoft.com/v1.0' + path, {
+    method: 'PATCH',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function graphPost(path, body) {
+  const token = await getToken();
+  const res = await fetch('https://graph.microsoft.com/v1.0' + path, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// ─── LOAD EMAILS ─────────────────────────────────────────
+async function loadEmails() {
+  const syncBtn = document.getElementById('sync-btn');
+  syncBtn.classList.add('spinning');
+
+  try {
+    // ── Step 1: fetch ALL folder listing once ──────────────
+    let allFolders = [];
+    try {
+      const [topLevel, inboxChildren] = await Promise.all([
+        graphGet('/me/mailFolders?$top=100'),
+        graphGet('/me/mailFolders/inbox/childFolders?$top=100')
+      ]);
+      allFolders = [...topLevel.value, ...inboxChildren.value];
+    } catch(e) { /* folder list failed silently */ }
+
+    // Helper — resolve existing folder only, NEVER create on sync
+    function resolveFolderId(name) {
+      const match = allFolders.find(f => f.displayName.toLowerCase() === name.toLowerCase());
+      if (match) { folderIdCache[name] = match.id; return match.id; }
+      return folderIdCache[name] || null;
+    }
+
+    // ── Step 2: build fetch list ───────────────────────────
+    // Source folders for INBOX column
+    const INBOX_FOLDERS = ['Panzi US Team', 'Cabinet Team', 'Panzi DRC Team'];
+
+    // Kanban columns — resolve existing Outlook folders only, skip if not found
+    const colFolderMapValid = COLUMNS
+      .filter(c => c.outlookFolder)
+      .map(c => ({ col: c.id, folderName: c.outlookFolder, folderId: resolveFolderId(c.outlookFolder) }))
+      .filter(c => c.folderId);
+
+
+    // Inbox source folders
+    const inboxFolderIds = INBOX_FOLDERS.map(name => resolveFolderId(name)).filter(Boolean);
+    const missingFolders = INBOX_FOLDERS.filter(name => !resolveFolderId(name));
+    if (missingFolders.length > 0) showToast(`⚠️ Inbox folders not found: ${missingFolders.join(', ')}`, 'error');
+
+    const msgSelect = '$top=100&$select=id,subject,from,bodyPreview,isRead,receivedDateTime,body,conversationId,webLink&$orderby=receivedDateTime desc';
+    async function fetchFolder(folderId, folderName, targetCol) {
+      const allEmails = [];
+      let url = `https://graph.microsoft.com/v1.0/me/mailFolders/${folderId}/messages?${msgSelect}`;
+      while (url) {
+        try {
+          const token = await getToken();
+          const res = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+          if (!res.ok) {
+            const err = await res.text();
+            if (err.includes('Throttl') || err.includes('throttl')) {
+              await new Promise(r => setTimeout(r, 2000));
+              continue; // retry same url
+            }
+            break;
+          }
+          const data = await res.json();
+          data.value.forEach(e => { e._folderName = folderName; e._targetCol = targetCol; });
+          allEmails.push(...data.value);
+          url = data['@odata.nextLink'] || null; // follow pagination
+          if (url) await new Promise(r => setTimeout(r, 200)); // small delay between pages
+        } catch(e) {
+          break;
+        }
+      }
+      return allEmails;
+    }
+
+    // ── Step 3: fetch column folders FIRST so they take priority ──
+    const emails = [];
+    const seen = new Set();
+
+    function addEmails(batch) {
+      batch.forEach(e => { if (!seen.has(e.id)) { seen.add(e.id); emails.push(e); } });
+    }
+
+    // Column folders first — these are the source of truth
+    for (const { col, folderName, folderId } of colFolderMapValid) {
+      const batch = await fetchFolder(folderId, folderName, col);
+      addEmails(batch);
+      await new Promise(res => setTimeout(res, 200));
+    }
+
+    // Then inbox — no focused filter (not supported on all account types)
+    try {
+      const r = await graphGet(`/me/mailFolders/inbox/messages?${msgSelect}`);
+      r.value.forEach(e => { e._folderName = 'Inbox'; e._targetCol = 'inbox'; });
+      addEmails(r.value);
+    } catch(e) { /* inbox fetch failed */ }
+
+    // Then inbox team folders
+    for (let i = 0; i < inboxFolderIds.length; i++) {
+      await new Promise(res => setTimeout(res, 200));
+      const batch = await fetchFolder(inboxFolderIds[i], INBOX_FOLDERS[i], 'inbox');
+      addEmails(batch);
+    }
+
+    // Sort by date desc
+    emails.sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
+
+    // Deduplicate by conversationId
+    // Non-inbox column assignment always wins over inbox
+    const convMap = new Map();
+    emails.forEach(e => {
+      const key = e.conversationId || e.id;
+      if (!convMap.has(key)) {
+        convMap.set(key, e);
+      } else {
+        const existing = convMap.get(key);
+        // Replace if new one has a more specific (non-inbox) column
+        if (existing._targetCol === 'inbox' && e._targetCol !== 'inbox') {
+          convMap.set(key, e);
+        }
+      }
+    });
+
+    // Also: any email whose ID directly appears in a column folder should use that column
+    // regardless of conversation grouping
+    const idToCol = {};
+    emails.forEach(e => {
+      if (e._targetCol !== 'inbox') idToCol[e.id] = e._targetCol;
+    });
+
+    const dedupedEmails = Array.from(convMap.values());
+    dedupedEmails.sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
+
+    // ── Step 4: assign columns ─────────────────────────────
+    cards = {};
+    colAssignments = {};
+    dedupedEmails.forEach(e => {
+      // Use direct ID match first, then conversation-level assignment
+      const col = idToCol[e.id] || e._targetCol || 'inbox';
+      colAssignments[e.id] = col;
+      cards[e.id] = { email: e, col };
+    });
+    saveAssignments();
+
+    renderCards();
+    showToast(`Synced ${dedupedEmails.length} threads`, 'success');
+  } catch(e) {
+    showToast('Sync failed: ' + e.message, 'error');
+    console.error(e);
+  }
+
+  syncBtn.classList.remove('spinning');
+}
+
+// ─── RENDER ───────────────────────────────────────────────
+function renderBoard() {
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+
+  COLUMNS.forEach(col => {
+    const colEl = document.createElement('div');
+    colEl.className = 'column' + (col.id === 'inbox' || COLUMNS.indexOf(col) === 0 ? ' col-inbox' : '');
+    colEl.dataset.col = col.id;
+    colEl.innerHTML = `
+      <div class="col-header" data-col="${col.id}">
+        <div class="col-title">
+          <div class="col-dot" style="background:${col.color || 'var(--accent)'}"></div>
+          ${col.label}
+        </div>
+        <span class="col-count" id="count-${col.id}">0</span>
+      </div>
+      <div class="col-body" id="col-${col.id}" data-col="${col.id}"
+        ondragover="onDragOver(event)"
+        ondragleave="onDragLeave(event)"
+        ondrop="onDrop(event)">
+        <div class="empty-col" id="empty-${col.id}">
+          <div class="empty-icon">${col.icon}</div>
+          <div>Drop emails here</div>
+        </div>
+      </div>
+    `;
+    board.appendChild(colEl);
+  });
+}
+
+function renderCards() {
+  // Clear columns
+  COLUMNS.forEach(col => {
+    const body = document.getElementById('col-' + col.id);
+    // Remove existing cards
+    body.querySelectorAll('.card').forEach(c => c.remove());
+  });
+
+  // Insert cards
+  let counts = {};
+  COLUMNS.forEach(c => counts[c.id] = 0);
+
+  Object.values(cards).forEach(({ email, col }) => {
+    const colBody = document.getElementById('col-' + col);
+    if (!colBody) return;
+    counts[col] = (counts[col] || 0) + 1;
+    const card = createCardEl(email, col);
+    colBody.appendChild(card);
+  });
+
+  // Update counts & empty states
+  COLUMNS.forEach(c => {
+    document.getElementById('count-' + c.id).textContent = counts[c.id] || 0;
+    const empty = document.getElementById('empty-' + c.id);
+    if (empty) empty.style.display = counts[c.id] > 0 ? 'none' : 'flex';
+  });
+}
+
+function createCardEl(email, col) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.draggable = true;
+  card.dataset.id = email.id;
+  card.dataset.col = col;
+
+  const colColor = COLUMNS.find(c => c.id === col)?.color || 'var(--accent)';
+  card.style.setProperty('--card-col-color', colColor);
+
+  const isInbox = (col === 'inbox' || COLUMNS.findIndex(c => c.id === col) === 0);
+  const from = email.from?.emailAddress?.name || email.from?.emailAddress?.address || 'Unknown';
+  const date = formatDate(email.receivedDateTime);
+  const subject = email.subject || '(no subject)';
+  const preview = email.bodyPreview || '';
+
+  const folderTag = email._folderName ? `<span style="font-size:0.62rem;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 6px;color:var(--muted)">${escHtml(email._folderName)}</span>` : '';
+
+  if (isInbox) {
+    // Full card — sender, date, subject, preview, folder tag
+    card.style.cssText = 'padding: 12px 14px';
+    const subjectDiv = document.createElement('div');
+    subjectDiv.style.cssText = 'font-family:Segoe UI,sans-serif;font-weight:700;font-size:0.82rem;color:var(--text);margin:6px 0 4px;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical';
+    subjectDiv.textContent = subject;
+
+    const previewDiv = document.createElement('div');
+    previewDiv.style.cssText = 'font-size:0.75rem;color:var(--muted);line-height:1.6;overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;margin-bottom:4px';
+    previewDiv.textContent = preview;
+
+    const fromDiv = document.createElement('div');
+    fromDiv.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:6px';
+    fromDiv.innerHTML = `
+      <span style="font-size:0.73rem;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1">${escHtml(from)}</span>
+      <span style="font-size:0.68rem;color:var(--muted);flex-shrink:0">${date}</span>
+      ${!email.isRead ? '<div style="width:6px;height:6px;border-radius:50%;background:var(--accent);flex-shrink:0;margin-left:4px"></div>' : ''}
+    `;
+
+    const metaDiv = document.createElement('div');
+    metaDiv.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:0.68rem;color:var(--muted)';
+    metaDiv.innerHTML = `
+      <div>${folderTag}</div>
+      <div class="card-actions">
+        <button class="card-action-btn" onclick="openEmail('${email.id}',event)">Open</button>
+        <button class="card-action-btn" onclick="markRead('${email.id}',event)">${email.isRead ? 'Unread' : 'Mark read'}</button>
+        <button class="card-action-btn" onclick="deleteEmail('${email.id}',event)" style="color:#ff6a8e;border-color:#ff6a8e">Delete</button>
+      </div>
+    `;
+
+    card.appendChild(fromDiv);
+    card.appendChild(subjectDiv);
+    card.appendChild(previewDiv);
+    card.appendChild(metaDiv);
+  } else {
+    // Slim card — just sender + truncated subject + date
+    card.style.padding = '8px 10px';
+    card.innerHTML = `
+      <div class="card-from">
+        <span class="card-from-name" style="font-size:0.72rem">${escHtml(from)}</span>
+        <span class="card-date">${date}</span>
+        ${!email.isRead ? '<div class="card-unread"></div>' : ''}
+      </div>
+      <div style="font-size:0.75rem;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px">${escHtml(subject)}</div>
+      <div class="card-meta" style="margin-top:6px;padding-top:6px">
+        <div>${hasNote(email.id) ? '<span style="font-size:0.65rem;color:var(--muted)">📝</span>' : ''}</div>
+        <div class="card-actions">
+          <button class="card-action-btn" onclick="openEmail('${email.id}',event)">Open</button>
+          <button class="card-action-btn" onclick="deleteEmail('${email.id}',event)" style="color:var(--accent2);border-color:var(--accent2)">Delete</button>
+        </div>
+      </div>
+    `;
+  }
+
+  card.addEventListener('dragstart', onDragStart);
+  card.addEventListener('dragend', onDragEnd);
+  card.addEventListener('dblclick', () => openEmail(email.id));
+
+  return card;
+}
+
+// ─── DRAG SCROLL ──────────────────────────────────────────
+let dragScrollInterval = null;
+
+function startDragScroll(e) {
+  const board = document.getElementById('board');
+  const ZONE = 120; // px from edge triggers scroll
+  const SPEED = 14;
+  stopDragScroll();
+  dragScrollInterval = setInterval(() => {
+    const rect = board.getBoundingClientRect();
+    const x = e.clientX;
+    if (x - rect.left < ZONE) {
+      board.scrollLeft -= SPEED;
+    } else if (rect.right - x < ZONE) {
+      board.scrollLeft += SPEED;
+    }
+  }, 16);
+}
+
+function stopDragScroll() {
+  if (dragScrollInterval) { clearInterval(dragScrollInterval); dragScrollInterval = null; }
+}
+
+// ─── DRAG & DROP ──────────────────────────────────────────
+let dragId = null;
+
+function onDragStart(e) {
+  dragId = e.currentTarget.dataset.id;
+  e.currentTarget.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  setTimeout(() => document.getElementById('trash-zone').classList.add('visible'), 50);
+}
+
+function onDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  document.getElementById('trash-zone').classList.remove('visible', 'hot');
+  stopDragScroll();
+}
+
+function onTrashDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  document.getElementById('trash-zone').classList.add('hot');
+}
+
+function onTrashDragLeave(e) {
+  document.getElementById('trash-zone').classList.remove('hot');
+}
+
+function onTrashDrop(e) {
+  e.preventDefault();
+  document.getElementById('trash-zone').classList.remove('visible', 'hot');
+  if (!dragId) return;
+  deleteEmail(dragId);
+  dragId = null;
+}
+
+function onDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('drag-over');
+}
+
+function onDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+
+function onDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  const targetCol = e.currentTarget.dataset.col;
+  if (!dragId || !targetCol) return;
+  moveCard(dragId, targetCol);
+}
+
+// Cache for all folder IDs
+const folderIdCache = {};
+
+async function getOrCreateFolder(folderName) {
+  if (folderIdCache[folderName]) return folderIdCache[folderName];
+  try {
+    const data = await graphGet('/me/mailFolders?$top=100');
+    const existing = data.value.find(f => f.displayName.toLowerCase() === folderName.toLowerCase());
+    if (existing) { folderIdCache[folderName] = existing.id; return existing.id; }
+    // Folder doesn't exist — don't create it, just warn
+    showToast(`⚠️ Outlook folder "${folderName}" not found`, 'error');
+    return null;
+  } catch(e) {
+    console.error('Could not find folder:', folderName, e);
+    return null;
+  }
+}
+
+async function moveCard(emailId, newCol) {
+  if (!cards[emailId]) return;
+  cards[emailId].col = newCol;
+  colAssignments[emailId] = newCol;
+  saveAssignments();
+  renderCards();
+
+  const col = COLUMNS.find(c => c.id === newCol);
+  const colLabel = col?.label || newCol;
+  showToast(`Moved to ${colLabel}`, 'success');
+
+  // Sync to Outlook folder if this column has one mapped
+  if (col?.outlookFolder) {
+    try {
+      const folderId = await getOrCreateFolder(col.outlookFolder);
+      if (folderId) {
+        await graphPost(`/me/messages/${emailId}/move`, { destinationId: folderId });
+        showToast(`Synced to "${col.outlookFolder}" in Outlook ✓`, 'success');
+      }
+    } catch(e) {
+      showToast(`Kanban updated, but Outlook sync failed: ${e.message}`, 'error');
+    }
+  }
+}
+
+// ─── EMAIL MODAL ──────────────────────────────────────────
+async function openEmail(emailId, event) {
+  if (event) event.stopPropagation();
+  const card = cards[emailId];
+  if (!card) return;
+
+  const email = card.email;
+  openEmailData = email;
+
+  document.getElementById('modal-subject').textContent = email.subject || '(no subject)';
+  // Update "Open in Outlook" link with direct email URL if available
+  const outlookLink = email.webLink || ('https://outlook.live.com/mail/search/' + encodeURIComponent(email.subject || ''));
+  const oolBtn = document.getElementById('open-in-outlook-btn');
+  if (oolBtn) oolBtn.href = outlookLink;
+  document.getElementById('modal-from').textContent =
+    `From: ${email.from?.emailAddress?.name || ''} <${email.from?.emailAddress?.address || ''}> · ${formatDate(email.receivedDateTime)}`;
+
+  // Body
+  const bodyEl = document.getElementById('modal-body');
+  bodyEl.textContent = '';
+
+  if (email.body?.content) {
+    if (email.body.contentType === 'html') {
+      // Strip HTML for display
+      const tmp = document.createElement('div');
+      tmp.innerHTML = email.body.content;
+      bodyEl.textContent = tmp.innerText;
+    } else {
+      bodyEl.textContent = email.body.content;
+    }
+  } else {
+    bodyEl.textContent = email.bodyPreview || '';
+  }
+
+  // Footer — move buttons
+  const footer = document.getElementById('modal-footer');
+  footer.innerHTML = '';
+
+  // Notes section (Mailbutler-style)
+  const noteKey = 'flowmail_note_' + emailId;
+  const savedNote = localStorage.getItem(noteKey) || '';
+  const noteSection = document.createElement('div');
+  noteSection.style.cssText = 'width:100%;margin-bottom:12px;border-top:1px solid var(--border);padding-top:12px';
+  noteSection.innerHTML = `
+    <div style="font-size:0.75rem;font-weight:600;color:var(--muted);margin-bottom:6px;display:flex;align-items:center;justify-content:space-between">
+      <span style="display:flex;align-items:center;gap:5px">📝 Notes <span style="font-size:0.68rem;font-weight:400">(saved locally)</span></span>
+      <a href="https://outlook.live.com/mail/" target="_blank" id="open-in-outlook-btn"
+        style="font-size:0.7rem;color:var(--accent);text-decoration:none;border:1px solid var(--accent);border-radius:4px;padding:2px 8px;white-space:nowrap">
+        ↗ Open in Outlook (+ Mailbutler)
+      </a>
+    </div>
+    <div style="font-size:0.7rem;color:var(--muted);background:var(--surface2);border-radius:5px;padding:6px 8px;margin-bottom:6px;line-height:1.5">
+      💡 To see Mailbutler tasks/notes for this email, click "Open in Outlook" above — Mailbutler's sidebar will show there.
+    </div>
+    <textarea id="email-note-${emailId}" style="width:100%;min-height:72px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:0.8rem;font-family:inherit;color:var(--text);resize:vertical;outline:none;line-height:1.5" placeholder="Add a note about this email...">${savedNote}</textarea>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+      <button class="btn btn-ghost" style="font-size:0.74rem;padding:4px 10px" onclick="saveEmailNote('${emailId}')">💾 Save note</button>
+      <span id="note-saved-${emailId}" style="font-size:0.7rem;color:var(--accent3);display:none">✓ Saved</span>
+    </div>`;
+  footer.appendChild(noteSection);
+
+  // Move buttons
+  const moveDiv = document.createElement('div');
+  moveDiv.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;width:100%';
+  COLUMNS.forEach(col => {
+    if (col.id !== card.col) {
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-ghost';
+      btn.style.fontSize = '0.76rem';
+      btn.textContent = `→ ${col.label}`;
+      btn.onclick = () => { moveCard(emailId, col.id); closeModal(); };
+      moveDiv.appendChild(btn);
+    }
+  });
+  footer.appendChild(moveDiv);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'btn btn-ghost';
+  closeBtn.style.cssText = 'margin-top:8px;width:100%';
+  closeBtn.textContent = 'Close';
+  closeBtn.onclick = closeModal;
+  footer.appendChild(closeBtn);
+
+  document.getElementById('modal-overlay').classList.add('open');
+
+  // Mark as read
+  if (!email.isRead) {
+    try {
+      await graphPatch('/me/messages/' + emailId, { isRead: true });
+      email.isRead = true;
+      renderCards();
+    } catch(e) {}
+  }
+}
+
+function closeModal(e) {
+  if (e && e.target !== document.getElementById('modal-overlay')) return;
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+
+async function markRead(emailId, event) {
+  if (event) event.stopPropagation();
+  const card = cards[emailId];
+  if (!card) return;
+  const newState = !card.email.isRead;
+  try {
+    await graphPatch('/me/messages/' + emailId, { isRead: newState });
+    card.email.isRead = newState;
+    renderCards();
+    showToast(newState ? 'Marked as read' : 'Marked as unread', 'success');
+  } catch(e) {
+    showToast('Could not update: ' + e.message, 'error');
+  }
+}
+
+// ─── DELETE EMAIL ─────────────────────────────────────────
+let pendingDeleteId = null;
+
+function deleteEmail(emailId, event) {
+  if (event) event.stopPropagation();
+  pendingDeleteId = emailId;
+  document.getElementById('delete-overlay').style.display = 'flex';
+}
+
+function closeDeleteConfirm() {
+  pendingDeleteId = null;
+  document.getElementById('delete-overlay').style.display = 'none';
+}
+
+async function confirmDelete() {
+  if (!pendingDeleteId) return;
+  const emailId = pendingDeleteId;
+  closeDeleteConfirm();
+  closeModal();
+  try {
+    const token = await getToken();
+    const res = await fetch(`https://graph.microsoft.com/v1.0/me/messages/${emailId}/move`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ destinationId: 'deleteditems' })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    delete cards[emailId];
+    delete colAssignments[emailId];
+    saveAssignments();
+    renderCards();
+    showToast('Email moved to Deleted Items', 'success');
+  } catch(e) {
+    showToast('Delete failed: ' + e.message, 'error');
+  }
+}
+
+// ─── COLUMN EDITOR ────────────────────────────────────────
+const COL_COLORS = ['#7c6aff','#ff9f6a','#6ab8ff','#6affcb','#ff6a8e','#f7d56e','#b06aff','#6b6b80'];
+let editingCols = [];
+
+function openColEditor() {
+  editingCols = COLUMNS.map(c => ({ ...c }));
+  renderColEditor();
+  document.getElementById('col-editor-overlay').style.display = 'flex';
+}
+
+function closeColEditor(e) {
+  if (e && e.target !== document.getElementById('col-editor-overlay')) return;
+  document.getElementById('col-editor-overlay').style.display = 'none';
+}
+
+function renderColEditor() {
+  const list = document.getElementById('col-editor-list');
+  list.innerHTML = '';
+  editingCols.forEach((col, i) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px';
+    row.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <button onclick="moveColUp(${i})" ${i === 0 ? 'disabled' : ''}
+          style="background:none;border:1px solid var(--border);border-radius:4px;color:${i === 0 ? 'var(--border)' : 'var(--muted)'};cursor:${i === 0 ? 'default' : 'pointer'};font-size:0.65rem;padding:1px 5px;line-height:1;font-family:monospace">▲</button>
+        <button onclick="moveColDown(${i})" ${i === editingCols.length - 1 ? 'disabled' : ''}
+          style="background:none;border:1px solid var(--border);border-radius:4px;color:${i === editingCols.length - 1 ? 'var(--border)' : 'var(--muted)'};cursor:${i === editingCols.length - 1 ? 'default' : 'pointer'};font-size:0.65rem;padding:1px 5px;line-height:1;font-family:monospace">▼</button>
+      </div>
+      <input value="${escHtml(col.label)}" oninput="editingCols[${i}].label=this.value"
+        style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-family:Segoe UI,sans-serif;font-size:0.8rem;outline:none"/>
+      <input value="${escHtml(col.icon)}" oninput="editingCols[${i}].icon=this.value"
+        style="width:40px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px;color:var(--text);font-family:Segoe UI,sans-serif;font-size:0.8rem;outline:none;text-align:center"/>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;max-width:120px">
+        ${COL_COLORS.map(color => `
+          <div onclick="editingCols[${i}].color='${color}';renderColEditor()"
+            style="width:16px;height:16px;border-radius:50%;background:${color};cursor:pointer;border:2px solid ${col.color===color?'white':'transparent'};transition:border 0.15s"></div>
+        `).join('')}
+      </div>
+      ${editingCols.length > 1 ? `<button onclick="removeColumn(${i})" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1rem;padding:0 4px" title="Remove">✕</button>` : ''}
+    `;
+    list.appendChild(row);
+  });
+}
+
+function moveColUp(i) {
+  if (i === 0) return;
+  [editingCols[i - 1], editingCols[i]] = [editingCols[i], editingCols[i - 1]];
+  renderColEditor();
+}
+
+function moveColDown(i) {
+  if (i === editingCols.length - 1) return;
+  [editingCols[i], editingCols[i + 1]] = [editingCols[i + 1], editingCols[i]];
+  renderColEditor();
+}
+
+function addColumn() {
+  const id = 'col_' + Date.now();
+  editingCols.push({ id, label: 'New Column', icon: '📌', color: COL_COLORS[editingCols.length % COL_COLORS.length] });
+  renderColEditor();
+}
+
+function removeColumn(i) {
+  const col = editingCols[i];
+  // Move cards from removed column to first column
+  Object.keys(colAssignments).forEach(emailId => {
+    if (colAssignments[emailId] === col.id) {
+      colAssignments[emailId] = editingCols[0]?.id || 'inbox';
+    }
+  });
+  editingCols.splice(i, 1);
+  renderColEditor();
+}
+
+function saveColumns() {
+  // Apply color as CSS var per column
+  COLUMNS.length = 0;
+  editingCols.forEach(c => COLUMNS.push({ ...c }));
+
+  // Update any card assignments that reference old col ids that no longer exist
+  const validIds = new Set(COLUMNS.map(c => c.id));
+  Object.keys(colAssignments).forEach(emailId => {
+    if (!validIds.has(colAssignments[emailId])) {
+      colAssignments[emailId] = COLUMNS[0].id;
+    }
+  });
+  // Also fix cards in memory
+  Object.keys(cards).forEach(emailId => {
+    if (!validIds.has(cards[emailId].col)) {
+      cards[emailId].col = COLUMNS[0].id;
+      colAssignments[emailId] = COLUMNS[0].id;
+    }
+  });
+
+  saveAssignments();
+  // Save columns to sessionStorage too
+  sessionStorage.setItem('flowmail_columns', JSON.stringify(COLUMNS));
+
+  document.getElementById('col-editor-overlay').style.display = 'none';
+  renderBoard();
+  renderCards();
+  showToast('Columns updated!', 'success');
+}
+
+// ─── NOTES (Mailbutler-style) ────────────────────────────
+function saveEmailNote(emailId) {
+  const ta = document.getElementById('email-note-' + emailId);
+  if (!ta) return;
+  const noteKey = 'flowmail_note_' + emailId;
+  localStorage.setItem(noteKey, ta.value);
+  const saved = document.getElementById('note-saved-' + emailId);
+  if (saved) {
+    saved.style.display = 'inline';
+    setTimeout(() => { saved.style.display = 'none'; }, 2000);
+  }
+}
+
+// Also show note indicator on cards that have notes
+function hasNote(emailId) {
+  return !!localStorage.getItem('flowmail_note_' + emailId);
+}
+
+// ─── UTILS ────────────────────────────────────────────────
+function saveAssignments() {
+  sessionStorage.setItem('flowmail_cols', JSON.stringify(colAssignments));
+}
+
+function formatDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const now = new Date();
+  const diff = now - d;
+  if (diff < 86400000) {
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function showToast(msg, type='') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = type ? `show ${type}` : 'show';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.classList.remove('show'); }, 3000);
+}
+
+// Close modal on Escape
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+});
+</script>
+</body>
+</html>
